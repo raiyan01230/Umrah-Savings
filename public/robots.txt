@@ -1,0 +1,8 @@
+# Robots.txt for The Way of Jannah (Umrah Savings Tracker)
+# Crawlers guidelines: Allow indexing of the applet homepage and basic resources.
+
+User-agent: *
+Allow: /
+
+# Sitemap Location (updates if you bind a custom domain)
+Sitemap: https://ais-pre-772oqmkzsvogs2ifp5rcdx-880225373442.asia-east1.run.app/Umrah-Savings/sitemap.xml
