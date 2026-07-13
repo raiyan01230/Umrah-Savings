@@ -37,8 +37,8 @@ export default function Navbar({
   ];
 
   return (
-    <nav className="bg-emerald-900 text-white sticky top-0 z-40 border-b border-emerald-800 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <header className="bg-emerald-900 text-white sticky top-0 z-40 border-b border-emerald-800 shadow-md">
+      <nav aria-label="Main Navigation" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setTab("dashboard")}>
@@ -146,7 +146,7 @@ export default function Navbar({
             </button>
           </div>
         </div>
-      </div>
+      </nav>
 
       {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
@@ -207,6 +207,6 @@ export default function Navbar({
           </div>
         </div>
       )}
-    </nav>
+    </header>
   );
 }
