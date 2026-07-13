@@ -1,0 +1,6 @@
+{
+  "name": "Umrah Savings Tracker",
+  "description": "A professional savings and financial tracker for Umrah with automated statistics, milestone celebrations, and dual-language support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
