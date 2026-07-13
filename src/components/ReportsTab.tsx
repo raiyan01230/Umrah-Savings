@@ -17,7 +17,7 @@ import {
   Plus,
   DollarSign
 } from "lucide-react";
-import { formatCurrency, formatNumber, downloadCSV, printDocument, getDayName } from "../utils/helpers";
+import { formatCurrency, formatNumber, downloadCSV, getDayName } from "../utils/helpers";
 import { translations } from "../utils/translations";
 import { SavingsEntry } from "../types";
 
@@ -35,6 +35,7 @@ interface ReportsTabProps {
     expense: number;
     notes: string;
   }) => Promise<void>;
+  onTriggerPrintReport?: (data: { title: string; headers: string[]; rows: string[][] }) => void;
 }
 
 export default function ReportsTab({
@@ -42,7 +43,8 @@ export default function ReportsTab({
   currency,
   lang,
   onDeleteEntry,
-  onEditEntry
+  onEditEntry,
+  onTriggerPrintReport
 }: ReportsTabProps) {
   const t = translations[lang];
 
@@ -240,24 +242,38 @@ export default function ReportsTab({
   };
 
   const handlePrint = () => {
-    if (activeReportTab === 'all') {
-      const headers = [t.date, t.day, t.dailyMoneyReceived, t.extraMoneyAmount, t.source, t.expenseAmount, t.todaySavings, t.notes];
-      const rows = processedEntries.map(e => [
-        e.date, e.day, formatCurrency(e.dailyMoney, currency, lang), formatCurrency(e.extraMoney, currency, lang), e.source, formatCurrency(e.expense, currency, lang), formatCurrency(e.todaySavings, currency, lang), e.notes
-      ]);
-      printDocument(lang === 'bn' ? "ওমরাহ সঞ্চয় এন্ট্রি তালিকা" : "Umrah Savings Entries", headers, rows);
-    } else if (activeReportTab === 'monthly') {
-      const headers = [lang === 'bn' ? "মাস" : "Month", t.totalIncome, t.totalExpenses, t.totalSaved, t.totalExtraMoney, t.avgSaving];
-      const rows = monthlyReports.map(m => [
-        m.monthKey, formatCurrency(m.totalIncome, currency, lang), formatCurrency(m.totalExpenses, currency, lang), formatCurrency(m.totalSaved, currency, lang), formatCurrency(m.extraMoney, currency, lang), formatCurrency(m.totalSaved / m.count, currency, lang)
-      ]);
-      printDocument(t.monthlyReport, headers, rows);
-    } else {
-      const headers = [lang === 'bn' ? "বছর" : "Year", t.totalIncome, t.totalExpenses, t.totalSaved, t.totalExtraMoney, t.avgSaving];
-      const rows = yearlyReports.map(y => [
-        y.yearKey, formatCurrency(y.totalIncome, currency, lang), formatCurrency(y.totalExpenses, currency, lang), formatCurrency(y.totalSaved, currency, lang), formatCurrency(y.extraMoney, currency, lang), formatCurrency(y.totalSaved / y.count, currency, lang)
-      ]);
-      printDocument(t.yearlyReport, headers, rows);
+    if (onTriggerPrintReport) {
+      if (activeReportTab === 'all') {
+        const headers = [t.date, t.day, t.dailyMoneyReceived, t.extraMoneyAmount, t.source, t.expenseAmount, t.todaySavings, t.notes];
+        const rows = processedEntries.map(e => [
+          e.date, e.day, formatCurrency(e.dailyMoney, currency, lang), formatCurrency(e.extraMoney, currency, lang), e.source, formatCurrency(e.expense, currency, lang), formatCurrency(e.todaySavings, currency, lang), e.notes
+        ]);
+        onTriggerPrintReport({
+          title: lang === 'bn' ? "ওমরাহ সঞ্চয় এন্ট্রি তালিকা" : "Umrah Savings Entries",
+          headers,
+          rows
+        });
+      } else if (activeReportTab === 'monthly') {
+        const headers = [lang === 'bn' ? "মাস" : "Month", t.totalIncome, t.totalExpenses, t.totalSaved, t.totalExtraMoney, t.avgSaving];
+        const rows = monthlyReports.map(m => [
+          m.monthKey, formatCurrency(m.totalIncome, currency, lang), formatCurrency(m.totalExpenses, currency, lang), formatCurrency(m.totalSaved, currency, lang), formatCurrency(m.extraMoney, currency, lang), formatCurrency(m.totalSaved / m.count, currency, lang)
+        ]);
+        onTriggerPrintReport({
+          title: t.monthlyReport,
+          headers,
+          rows
+        });
+      } else {
+        const headers = [lang === 'bn' ? "বছর" : "Year", t.totalIncome, t.totalExpenses, t.totalSaved, t.totalExtraMoney, t.avgSaving];
+        const rows = yearlyReports.map(y => [
+          y.yearKey, formatCurrency(y.totalIncome, currency, lang), formatCurrency(y.totalExpenses, currency, lang), formatCurrency(y.totalSaved, currency, lang), formatCurrency(y.extraMoney, currency, lang), formatCurrency(y.totalSaved / y.count, currency, lang)
+        ]);
+        onTriggerPrintReport({
+          title: t.yearlyReport,
+          headers,
+          rows
+        });
+      }
     }
   };
 

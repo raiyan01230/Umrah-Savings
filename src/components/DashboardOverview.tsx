@@ -28,6 +28,13 @@ interface DashboardOverviewProps {
   setTab: (tab: string) => void;
   userName?: string;
   quotes?: IslamicQuote[];
+  onTriggerPrintCertificate?: (data: {
+    userName: string;
+    progressPercentage: number;
+    currentSavings: number;
+    goalAmount: number;
+    totalDays: number;
+  }) => void;
 }
 
 export default function DashboardOverview({
@@ -37,7 +44,8 @@ export default function DashboardOverview({
   lang,
   setTab,
   userName,
-  quotes
+  quotes,
+  onTriggerPrintCertificate
 }: DashboardOverviewProps) {
   const t = translations[lang];
 
@@ -49,202 +57,15 @@ export default function DashboardOverview({
   const strokeDashoffset = circumference - (Math.min(stats.progressPercentage, 100) / 100) * circumference;
 
   const handlePrintCertificate = () => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-
-    const title = lang === 'bn' ? "ওমরাহ সঞ্চয় মাইলফলক সনদ" : "Umrah Savings Progress Certificate";
-    const name = userName || (lang === 'bn' ? "ওমরাহ যাত্রী" : "Umrah Pilgrim");
-    const progressText = lang === 'bn' 
-      ? `ওমরাহ সঞ্চয় লক্ষ্যের ${formatNumber(Math.round(stats.progressPercentage), 'bn')}% অর্জন করার সফল স্মারক`
-      : `In recognition of successfully achieving ${Math.round(stats.progressPercentage)}% of the Umrah savings goal!`;
-
-    const html = `
-      <html>
-        <head>
-          <title>${title}</title>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Amiri&family=Inter:wght@400;600;700&display=swap');
-            body {
-              background-color: #fcfbf7;
-              color: #1c2c22;
-              font-family: 'Inter', sans-serif;
-              padding: 40px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              min-height: 100vh;
-              margin: 0;
-            }
-            .certificate-container {
-              border: 15px double #c5a85c;
-              padding: 50px 70px;
-              max-width: 800px;
-              width: 100%;
-              background: white;
-              box-shadow: 0 4px 30px rgba(0,0,0,0.03);
-              text-align: center;
-              position: relative;
-              background-image: radial-gradient(circle, #fbfaf5 1px, transparent 1px);
-              background-size: 20px 20px;
-            }
-            .gold-corner {
-              position: absolute;
-              width: 50px;
-              height: 50px;
-              border: 3px solid #c5a85c;
-            }
-            .top-left { top: 15px; left: 15px; border-right: none; border-bottom: none; }
-            .top-right { top: 15px; right: 15px; border-left: none; border-bottom: none; }
-            .bottom-left { bottom: 15px; left: 15px; border-right: none; border-top: none; }
-            .bottom-right { bottom: 15px; right: 15px; border-left: none; border-top: none; }
-            
-            .header-bismillah {
-              font-family: 'Amiri', serif;
-              font-size: 24px;
-              color: #064e3b;
-              margin-bottom: 20px;
-              letter-spacing: 1px;
-            }
-            .cert-title {
-              font-family: 'Cinzel', serif;
-              font-size: 28px;
-              font-weight: 700;
-              color: #064e3b;
-              text-transform: uppercase;
-              letter-spacing: 2px;
-              margin-bottom: 10px;
-            }
-            .cert-subtitle {
-              font-size: 13px;
-              color: #c5a85c;
-              text-transform: uppercase;
-              letter-spacing: 3px;
-              font-weight: 700;
-              margin-bottom: 40px;
-            }
-            .presented-to {
-              font-size: 14px;
-              font-style: italic;
-              color: #666;
-              margin-bottom: 15px;
-            }
-            .recipient-name {
-              font-family: 'Cinzel', serif;
-              font-size: 32px;
-              font-weight: 700;
-              color: #064e3b;
-              border-bottom: 2px solid #e5e7eb;
-              display: inline-block;
-              padding-bottom: 8px;
-              margin-bottom: 30px;
-              min-width: 300px;
-            }
-            .description {
-              font-size: 16px;
-              line-height: 1.6;
-              color: #374151;
-              margin-bottom: 40px;
-              max-width: 600px;
-              margin-left: auto;
-              margin-right: auto;
-            }
-            .stats-grid {
-              display: grid;
-              grid-template-cols: repeat(3, 1fr);
-              gap: 20px;
-              max-width: 500px;
-              margin: 0 auto 40px auto;
-              border-top: 1px solid #f3f4f6;
-              border-bottom: 1px solid #f3f4f6;
-              padding: 20px 0;
-            }
-            .stat-box {
-              text-align: center;
-            }
-            .stat-value {
-              font-size: 18px;
-              font-weight: 700;
-              color: #064e3b;
-            }
-            .stat-label {
-              font-size: 10px;
-              text-transform: uppercase;
-              color: #c5a85c;
-              letter-spacing: 1px;
-              margin-top: 5px;
-              font-weight: 600;
-            }
-            .footer-prayer {
-              font-family: 'Amiri', serif;
-              font-size: 18px;
-              color: #064e3b;
-              line-height: 1.6;
-              margin-bottom: 30px;
-              font-style: italic;
-            }
-            .footer-watermark {
-              font-size: 11px;
-              color: #9ca3af;
-              font-family: monospace;
-            }
-            @media print {
-              body { background: white; padding: 0; }
-              .certificate-container { border-color: #c5a85c !important; box-shadow: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="certificate-container">
-            <div class="gold-corner top-left"></div>
-            <div class="gold-corner top-right"></div>
-            <div class="gold-corner bottom-left"></div>
-            <div class="gold-corner bottom-right"></div>
-            
-            <div class="header-bismillah">بِسْمِ اللَّهِ الرَّحْمَٰনِ الرَّحِيمِ</div>
-            <div class="cert-title">\${lang === 'bn' ? 'মাইলফলক অগ্রগতি সনদ' : 'Milestone Certificate'}</div>
-            <div class="cert-subtitle">\${lang === 'bn' ? 'ওমরাহ সঞ্চয় পথচলা' : 'Umrah Savings Journey'}</div>
-            
-            <div class="presented-to">\${lang === 'bn' ? 'সম্মানের সাথে প্রদান করা হলো' : 'This certificate is proudly presented to'}</div>
-            <div class="recipient-name">\${name}</div>
-            
-            <div class="description">
-              \${progressText}
-            </div>
-            
-            <div class="stats-grid">
-              <div class="stat-box">
-                <div class="stat-value">\${formatNumber(Math.round(stats.progressPercentage), lang)}%</div>
-                <div class="stat-label">\${lang === 'bn' ? 'সম্পূর্ণ অগ্রগতি' : 'Progress'}</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-value">\${formatCurrency(stats.currentSavings, currency, lang)}</div>
-                <div class="stat-label">\${lang === 'bn' ? 'বর্তমান সঞ্চয়' : 'Total Saved'}</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-value">\${formatNumber(entries.length, lang)} \${lang === 'bn' ? 'দিন' : 'Days'}</div>
-                <div class="stat-label">\${lang === 'bn' ? 'মোট লগ ইন' : 'Logged Days'}</div>
-              </div>
-            </div>
-            
-            <div class="footer-prayer">
-              \${lang === 'bn' 
-                ? '“হে আল্লাহ! আমাদের নিয়তকে কবুল করুন, পবিত্র ওমরাহ সফরকে সহজ করে দিন এবং বাইতুল্লাহর যিয়ারত নসীব করুন। আমীন।”' 
-                : '"May Allah accept your pure intentions, facilitate your journey, and make it easy for you to visit the Holy Kaaba. Ameen."'}
-            </div>
-            
-            <div class="footer-watermark">
-              \${lang === 'bn' ? 'ওমরাহ সঞ্চয় ট্র্যাকার' : 'Umrah Savings Tracker'} • \${new Date().toLocaleDateString(lang === 'bn' ? 'bn-BD' : 'en-US')}
-            </div>
-          </div>
-          <script>
-            window.onload = function() { window.print(); }
-          </script>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(html);
-    printWindow.document.close();
+    if (onTriggerPrintCertificate) {
+      onTriggerPrintCertificate({
+        userName: userName || "",
+        progressPercentage: Math.round(stats.progressPercentage),
+        currentSavings: stats.currentSavings,
+        goalAmount: stats.goalAmount,
+        totalDays: entries.length
+      });
+    }
   };
 
   // Motivational verses/Hadith for Umrah journey

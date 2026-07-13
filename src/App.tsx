@@ -17,6 +17,7 @@ import ExpenseTab from "./components/ExpenseTab";
 import ChartsView from "./components/ChartsView";
 import SettingsTab from "./components/SettingsTab";
 import ToastContainer, { ToastMessage } from "./components/Toast";
+import PrintPreviewModal from "./components/PrintPreviewModal";
 
 // Types
 import { UserProfile, UserSettings, SavingsEntry, DashboardStats } from "./types";
@@ -40,6 +41,23 @@ export default function App() {
 
   // Notifications State
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Print Preview configuration state
+  const [printConfig, setPrintConfig] = useState<{
+    type: "report" | "certificate";
+    reportData?: {
+      title: string;
+      headers: string[];
+      rows: string[][];
+    };
+    certificateData?: {
+      userName: string;
+      progressPercentage: number;
+      currentSavings: number;
+      goalAmount: number;
+      totalDays: number;
+    };
+  } | null>(null);
 
   // First snap flag to prevent alerting initial milestone state
   const isFirstLoad = useRef(true);
@@ -495,92 +513,117 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors duration-300">
-      {/* Toast Notification HUD */}
-      <ToastContainer toasts={toasts} onClose={removeToast} />
+      <div className="print:hidden">
+        {/* Toast Notification HUD */}
+        <ToastContainer toasts={toasts} onClose={removeToast} />
 
-      {/* Primary Top Header & Nav Rail */}
-      <Navbar
-        currentTab={currentTab}
-        setTab={setTab}
-        user={user}
-        onLogout={handleLogout}
-        lang={settings.language}
-        setLang={toggleLanguage}
-        theme={settings.theme}
-        toggleTheme={toggleTheme}
-      />
+        {/* Primary Top Header & Nav Rail */}
+        <Navbar
+          currentTab={currentTab}
+          setTab={setTab}
+          user={user}
+          onLogout={handleLogout}
+          lang={settings.language}
+          setLang={toggleLanguage}
+          theme={settings.theme}
+          toggleTheme={toggleTheme}
+        />
 
-      {/* Main Interactive Stage */}
-      <main className="pb-16">
-        {currentTab === "dashboard" && (
-          <div className="space-y-6">
-            <DashboardOverview
-              stats={stats}
+        {/* Main Interactive Stage */}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-16">
+          {currentTab === "dashboard" && (
+            <div className="space-y-6">
+              <DashboardOverview
+                stats={stats}
+                entries={entries}
+                currency={settings.currency}
+                lang={settings.language}
+                setTab={setTab}
+                userName={profile?.displayName || user.displayName || ""}
+                quotes={quotes}
+                onTriggerPrintCertificate={(certificateData) => {
+                  setPrintConfig({
+                    type: "certificate",
+                    certificateData
+                  });
+                }}
+              />
+              <ChartsView
+                entries={entries}
+                currency={settings.currency}
+                lang={settings.language}
+              />
+            </div>
+          )}
+
+          {currentTab === "newEntry" && (
+            <DailyEntryForm
+              onSave={handleSaveEntry}
+              currency={settings.currency}
+              lang={settings.language}
+            />
+          )}
+
+          {currentTab === "reports" && (
+            <ReportsTab
               entries={entries}
               currency={settings.currency}
               lang={settings.language}
-              setTab={setTab}
-              userName={profile?.displayName || user.displayName || ""}
-              quotes={quotes}
+              onDeleteEntry={handleDeleteEntry}
+              onEditEntry={handleEditEntry}
+              onTriggerPrintReport={(reportData) => {
+                setPrintConfig({
+                  type: "report",
+                  reportData
+                });
+              }}
             />
-            <ChartsView
+          )}
+
+          {currentTab === "extraMoney" && (
+            <ExtraMoneyTab
               entries={entries}
               currency={settings.currency}
               lang={settings.language}
             />
-          </div>
-        )}
+          )}
 
-        {currentTab === "newEntry" && (
-          <DailyEntryForm
-            onSave={handleSaveEntry}
-            currency={settings.currency}
-            lang={settings.language}
-          />
-        )}
+          {currentTab === "expenses" && (
+            <ExpenseTab
+              entries={entries}
+              currency={settings.currency}
+              lang={settings.language}
+            />
+          )}
 
-        {currentTab === "reports" && (
-          <ReportsTab
-            entries={entries}
-            currency={settings.currency}
-            lang={settings.language}
-            onDeleteEntry={handleDeleteEntry}
-            onEditEntry={handleEditEntry}
-          />
-        )}
+          {currentTab === "settings" && (
+            <SettingsTab
+              settings={settings}
+              profile={profile}
+              onSaveSettings={handleSaveSettings}
+              onSaveProfile={handleSaveProfile}
+              lang={settings.language}
+            />
+          )}
+        </main>
 
-        {currentTab === "extraMoney" && (
-          <ExtraMoneyTab
-            entries={entries}
-            currency={settings.currency}
-            lang={settings.language}
-          />
-        )}
+        {/* Desktop/Mobile Global Footer */}
+        <footer className="py-6 border-t border-slate-200 dark:border-slate-900 bg-white dark:bg-slate-950 text-center text-xs text-gray-400 dark:text-gray-500 font-mono">
+          <p>© {new Date().getFullYear()} {translations[settings.language].appName} • {translations[settings.language].tagline}</p>
+          <p className="mt-1 opacity-75">Alhamdulillah for all blessings • May Allah accept your intention</p>
+        </footer>
+      </div>
 
-        {currentTab === "expenses" && (
-          <ExpenseTab
-            entries={entries}
-            currency={settings.currency}
-            lang={settings.language}
-          />
-        )}
-
-        {currentTab === "settings" && (
-          <SettingsTab
-            settings={settings}
-            profile={profile}
-            onSaveSettings={handleSaveSettings}
-            onSaveProfile={handleSaveProfile}
-            lang={settings.language}
-          />
-        )}
-      </main>
-
-      {/* Desktop/Mobile Global Footer */}
-      <footer className="py-6 border-t border-slate-200 dark:border-slate-900 bg-white dark:bg-slate-950 text-center text-xs text-gray-400 dark:text-gray-500 font-mono">
-        <p>© {new Date().getFullYear()} {translations[settings.language].appName} • {translations[settings.language].tagline}</p>
-        <p className="mt-1 opacity-75">Alhamdulillah for all blessings • May Allah accept your intention</p>
-      </footer>
+      {printConfig && (
+        <PrintPreviewModal
+          type={printConfig.type}
+          lang={settings.language}
+          currency={settings.currency}
+          reportData={printConfig.reportData}
+          certificateData={printConfig.certificateData}
+          onClose={() => setPrintConfig(null)}
+        />
+      )}
     </div>
   );
 }
