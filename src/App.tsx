@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useRef } from "react";
-import { onAuthStateChanged, signOut, updateProfile } from "firebase/auth";
-import { doc, onSnapshot, setDoc, deleteDoc, collection } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import {
+  supabase,
+  signOutUser,
+  getUserSettings,
+  saveUserSettings,
+  getUserProfile,
+  saveUserProfile,
+  updateUserProfile,
+  getSavingsEntries,
+  addSavingsEntry,
+  editSavingsEntry,
+  removeSavingsEntry,
+  getQuotes,
+} from "./supabase";
 import { translations } from "./utils/translations";
 import defaultAvatar from "./assets/images/user_profile_pic_1783927457570.jpg";
 import { defaultIslamicQuotes, IslamicQuote } from "./data/quotesData";
@@ -79,19 +90,67 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Auth Listener
+  // 1. Supabase Auth State Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (authUser) => {
-      if (authUser) {
+    // Check initial session
+    const checkInitialSession = async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.user) {
+          const authUser = data.session.user;
+          setUser(authUser);
+          const userMeta = authUser.user_metadata || {};
+          setProfile({
+            uid: authUser.id,
+            email: authUser.email || "",
+            displayName: userMeta.displayName || userMeta.display_name || "Explorer",
+            photoURL: userMeta.photoURL || userMeta.photo_url || defaultAvatar,
+            createdAt: authUser.created_at || new Date().toISOString()
+          });
+        } else {
+          // Check local fallback user if available
+          const raw = localStorage.getItem("umrah_savings_auth_user_v2");
+          if (raw) {
+            try {
+              const localUser = JSON.parse(raw);
+              setUser(localUser);
+              setProfile({
+                uid: localUser.id,
+                email: localUser.email || "",
+                displayName: localUser.user_metadata?.displayName || "Explorer",
+                photoURL: localUser.user_metadata?.photoURL || defaultAvatar,
+                createdAt: localUser.created_at || new Date().toISOString()
+              });
+            } catch (e) {
+              setUser(null);
+            }
+          } else {
+            setUser(null);
+          }
+        }
+      } catch (err) {
+        console.warn("Auth initialization error:", err);
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+
+    checkInitialSession();
+
+    // Listen for auth state changes in Supabase
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const authUser = session.user;
         setUser(authUser);
+        const userMeta = authUser.user_metadata || {};
         setProfile({
-          uid: authUser.uid,
+          uid: authUser.id,
           email: authUser.email || "",
-          displayName: authUser.displayName || "Explorer",
-          photoURL: authUser.photoURL || defaultAvatar,
-          createdAt: new Date().toISOString()
+          displayName: userMeta.displayName || userMeta.display_name || "Explorer",
+          photoURL: userMeta.photoURL || userMeta.photo_url || defaultAvatar,
+          createdAt: authUser.created_at || new Date().toISOString()
         });
-      } else {
+      } else if (event === "SIGNED_OUT") {
         setUser(null);
         setProfile(null);
         setEntries([]);
@@ -99,126 +158,68 @@ export default function App() {
       setAuthChecking(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
   }, []);
 
-  // Sync / Seed Quotes with Firestore
+  // 2. Load Quotes
   useEffect(() => {
-    if (!user) return;
-
-    const quotesColRef = collection(db, "quotes");
-    
-    // Subscribe/Listen to quotes from Firestore
-    const unsubscribe = onSnapshot(quotesColRef, async (colSnap) => {
-      if (colSnap.empty) {
-        // If empty, let's seed the database in the background!
-        try {
-          console.log("Seeding Islamic quotes to Firestore...");
-          for (let i = 0; i < defaultIslamicQuotes.length; i++) {
-            const quote = defaultIslamicQuotes[i];
-            const qDocRef = doc(db, "quotes", `quote_${i + 1}`);
-            await setDoc(qDocRef, quote);
-          }
-        } catch (err) {
-          console.error("Error seeding quotes to Firestore:", err);
-        }
-      } else {
-        const fetchedQuotes: IslamicQuote[] = [];
-        colSnap.forEach((doc) => {
-          const data = doc.data();
-          fetchedQuotes.push({
-            id: doc.id,
-            en: data.en,
-            bn: data.bn,
-            source: data.source
-          });
-        });
-        // Sort them by their ID key suffix to maintain proper sequential order
-        fetchedQuotes.sort((a, b) => {
-          const numA = parseInt(a.id?.replace("quote_", "") || "0", 10);
-          const numB = parseInt(b.id?.replace("quote_", "") || "0", 10);
-          return numA - numB;
-        });
-        setQuotes(fetchedQuotes);
+    const fetchQuotesData = async () => {
+      const q = await getQuotes();
+      if (q && q.length > 0) {
+        setQuotes(q);
       }
-    }, (error) => {
-      // Handle permission/connection issues gracefully without crashing
-      console.warn("Firestore Quotes loading fallback to local default:", error);
-    });
-
-    return () => unsubscribe();
+    };
+    fetchQuotesData();
   }, [user]);
 
-  // Settings & Profile Listener + Initial Setup
+  // 3. Load Settings, Profile, & Entries for current authenticated user
   useEffect(() => {
     if (!user) return;
+    const userId = user.id || user.uid;
 
-    const userDocRef = doc(db, "users", user.uid);
-    const unsubscribe = onSnapshot(userDocRef, async (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data.settings) {
-          setSettings(data.settings);
-        }
-        if (data.profile) {
-          setProfile(data.profile);
-        }
-      } else {
-        // Document doesn't exist, let's initialize it
-        const initialPayload = {
-          profile: {
-            uid: user.uid,
-            email: user.email || "",
-            displayName: user.displayName || "Explorer",
-            photoURL: user.photoURL || defaultAvatar,
-            createdAt: new Date().toISOString()
-          },
-          settings: {
-            goalAmount: 160000,
-            currency: "BDT",
-            theme: "light",
-            language: "en"
-          }
-        };
-        await setDoc(userDocRef, initialPayload);
-        setSettings(initialPayload.settings);
-        setProfile(initialPayload.profile);
+    const loadUserData = async () => {
+      try {
+        // Load Settings
+        const s = await getUserSettings(userId);
+        setSettings(s);
+
+        // Load Profile
+        const p = await getUserProfile(userId, user.email || "");
+        if (p) setProfile(p);
+
+        // Load Entries
+        const e = await getSavingsEntries(userId);
+        setEntries(e);
+      } catch (err) {
+        console.warn("Error loading user data from Supabase:", err);
       }
-    });
+    };
 
-    return () => unsubscribe();
-  }, [user]);
+    loadUserData();
 
-  // Realtime Entries Listener
-  useEffect(() => {
-    if (!user) return;
+    // Realtime changes listener on Supabase savings_entries table
+    const channel = supabase
+      .channel(`savings_entries_changes_${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'savings_entries',
+          filter: `user_id=eq.${userId}`
+        },
+        async () => {
+          const freshEntries = await getSavingsEntries(userId);
+          setEntries(freshEntries);
+        }
+      )
+      .subscribe();
 
-    const entriesColRef = collection(db, "users", user.uid, "entries");
-    const unsubscribe = onSnapshot(entriesColRef, (colSnap) => {
-      const fetchedEntries: SavingsEntry[] = [];
-      colSnap.forEach((doc) => {
-        const data = doc.data();
-        fetchedEntries.push({
-          id: doc.id,
-          date: data.date,
-          day: data.day,
-          dailyMoney: data.dailyMoney || 0,
-          extraMoney: data.extraMoney || 0,
-          source: data.source || "Other",
-          expense: data.expense || 0,
-          todaySavings: data.todaySavings || 0,
-          notes: data.notes || "",
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt
-        });
-      });
-
-      // Sort entries by date descending for UI display
-      const sorted = fetchedEntries.sort((a, b) => b.date.localeCompare(a.date));
-      setEntries(sorted);
-    });
-
-    return () => unsubscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   // Handle Light / Dark Theme Apply
@@ -329,7 +330,7 @@ export default function App() {
     };
   }, [entries, settings.goalAmount, settings.language]);
 
-  // 1. SAVE NEW ENTRY TO FIRESTORE
+  // 1. SAVE NEW ENTRY TO SUPABASE
   const handleSaveEntry = async (entry: {
     date: string;
     day: string;
@@ -340,32 +341,23 @@ export default function App() {
     notes: string;
   }) => {
     if (!user) return;
+    const userId = user.id || user.uid;
     try {
-      // Calculate today's savings
-      const todaySavings = entry.dailyMoney + entry.extraMoney - entry.expense;
-
-      // Unique entry id based on timestamp + rand
-      const entryId = Date.now().toString();
-
-      await setDoc(doc(db, "users", user.uid, "entries", entryId), {
-        ...entry,
-        todaySavings,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      const created = await addSavingsEntry(userId, entry);
+      setEntries((prev) => [created, ...prev.filter((e) => e.id !== created.id)].sort((a, b) => b.date.localeCompare(a.date)));
 
       addToast(
         settings.language === 'bn' ? "এন্ট্রি সফলভাবে সংরক্ষণ করা হয়েছে!" : "Financial entry added successfully!",
         'success'
       );
-      setTab("dashboard"); // Go back to dashboard to see real-time updates!
+      setTab("dashboard");
     } catch (err: any) {
       console.error(err);
       addToast(err.message || "Failed to save entry.", 'error');
     }
   };
 
-  // 1.5 EDIT EXISTING ENTRY IN FIRESTORE
+  // 2. EDIT EXISTING ENTRY IN SUPABASE
   const handleEditEntry = async (id: string, updatedData: {
     date: string;
     day: string;
@@ -376,13 +368,11 @@ export default function App() {
     notes: string;
   }) => {
     if (!user) return;
+    const userId = user.id || user.uid;
     try {
-      const todaySavings = updatedData.dailyMoney + updatedData.extraMoney - updatedData.expense;
-      await setDoc(doc(db, "users", user.uid, "entries", id), {
-        ...updatedData,
-        todaySavings,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      await editSavingsEntry(userId, id, updatedData);
+      const fresh = await getSavingsEntries(userId);
+      setEntries(fresh);
 
       addToast(
         settings.language === 'bn' ? "এন্ট্রি সফলভাবে আপডেট করা হয়েছে!" : "Financial entry updated successfully!",
@@ -394,11 +384,13 @@ export default function App() {
     }
   };
 
-  // 2. DELETE ENTRY FROM FIRESTORE
+  // 3. DELETE ENTRY FROM SUPABASE
   const handleDeleteEntry = async (id: string) => {
     if (!user) return;
+    const userId = user.id || user.uid;
     try {
-      await deleteDoc(doc(db, "users", user.uid, "entries", id));
+      await removeSavingsEntry(userId, id);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
       addToast(
         settings.language === 'bn' ? "এন্ট্রি মুছে ফেলা হয়েছে!" : "Entry removed successfully!",
         'success'
@@ -409,12 +401,13 @@ export default function App() {
     }
   };
 
-  // 3. UPDATE APPLICATION CONFIGURATION SETTINGS
+  // 4. UPDATE APPLICATION CONFIGURATION SETTINGS
   const handleSaveSettings = async (newSettings: UserSettings) => {
     if (!user) return;
+    const userId = user.id || user.uid;
     try {
-      const userDocRef = doc(db, "users", user.uid);
-      await setDoc(userDocRef, { settings: newSettings }, { merge: true });
+      setSettings(newSettings);
+      await saveUserSettings(userId, newSettings);
       addToast(
         newSettings.language === 'bn' ? "সেটিংস সফলভাবে সংরক্ষিত হয়েছে!" : "Application settings updated!",
         'success'
@@ -425,30 +418,20 @@ export default function App() {
     }
   };
 
-  // 4. UPDATE USER PROFILE DETAILS
+  // 5. UPDATE USER PROFILE DETAILS
   const handleSaveProfile = async (displayName: string, photoURL: string) => {
     if (!user) return;
+    const userId = user.id || user.uid;
     try {
-      // Update Auth Profile
-      await updateProfile(auth.currentUser!, {
+      await updateUserProfile(displayName, photoURL);
+      await saveUserProfile(userId, { displayName, photoURL, email: user.email });
+
+      setProfile((prev) => prev ? ({ ...prev, displayName, photoURL }) : {
+        uid: userId,
+        email: user.email || "",
         displayName,
-        photoURL
-      });
-
-      // Update User Doc Profile
-      const userDocRef = doc(db, "users", user.uid);
-      await setDoc(userDocRef, {
-        profile: {
-          uid: user.uid,
-          email: user.email || "",
-          displayName,
-          photoURL,
-          updatedAt: new Date().toISOString()
-        }
-      }, { merge: true });
-
-      setUser({
-        ...auth.currentUser
+        photoURL,
+        createdAt: new Date().toISOString()
       });
 
       addToast(
@@ -463,7 +446,10 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      await signOutUser();
+      setUser(null);
+      setProfile(null);
+      setEntries([]);
       addToast(
         settings.language === 'bn' ? "সাফল্যের সাথে লগ আউট হয়েছে!" : "Signed out successfully!",
         'info'
@@ -492,7 +478,7 @@ export default function App() {
   if (authChecking) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center gap-4">
-        {/* Spinner or beautiful custom loading dome */}
+        {/* Spinner */}
         <div className="w-12 h-12 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin" />
         <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-400 animate-pulse font-mono">
           Bismillahir Rahmanir Rahim...
@@ -539,7 +525,7 @@ export default function App() {
                 currency={settings.currency}
                 lang={settings.language}
                 setTab={setTab}
-                userName={profile?.displayName || user.displayName || ""}
+                userName={profile?.displayName || user.user_metadata?.displayName || user.displayName || ""}
                 quotes={quotes}
                 onTriggerPrintCertificate={(certificateData) => {
                   setPrintConfig({
