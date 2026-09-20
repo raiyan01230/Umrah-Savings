@@ -58,38 +58,26 @@ ALTER TABLE public.quotes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can manage own profile" ON public.profiles;
 
 DROP POLICY IF EXISTS "Users can view own settings" ON public.user_settings;
 DROP POLICY IF EXISTS "Users can insert own settings" ON public.user_settings;
 DROP POLICY IF EXISTS "Users can update own settings" ON public.user_settings;
+DROP POLICY IF EXISTS "Users can manage own settings" ON public.user_settings;
 
 DROP POLICY IF EXISTS "Users can manage own savings entries" ON public.savings_entries;
 DROP POLICY IF EXISTS "Anyone can read quotes" ON public.quotes;
 
 -- Create RLS Policies
-CREATE POLICY "Users can view own profile"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can insert own profile"
-  ON public.profiles FOR INSERT
+CREATE POLICY "Users can manage own profile"
+  ON public.profiles FOR ALL
+  USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
 
-CREATE POLICY "Users can update own profile"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can view own settings"
-  ON public.user_settings FOR SELECT
-  USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own settings"
-  ON public.user_settings FOR INSERT
+CREATE POLICY "Users can manage own settings"
+  ON public.user_settings FOR ALL
+  USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own settings"
-  ON public.user_settings FOR UPDATE
-  USING (auth.uid() = user_id);
 
 CREATE POLICY "Users can manage own savings entries"
   ON public.savings_entries FOR ALL

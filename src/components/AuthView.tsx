@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { signInUser, signUpUser, resetPasswordForUser, signInAsGuest } from "../supabase";
+import { signInUser, signUpUser, resetPasswordForUser } from "../supabase";
 import { motion, AnimatePresence } from "motion/react";
-import { Mail, Lock, User, Image, ArrowRight, Compass, ShieldCheck, UserCheck, AlertCircle, Sparkles } from "lucide-react";
+import { Mail, Lock, User, Image as ImageIcon, ArrowRight, Compass, ShieldCheck, UserCheck, AlertCircle, Upload, Camera } from "lucide-react";
 import defaultAvatar from "../assets/images/user_profile_pic_1783927457570.jpg";
+import { compressImage } from "../utils/storage";
 
 interface AuthViewProps {
   onNotify: (text: string, type: 'success' | 'error' | 'info') => void;
@@ -16,7 +17,7 @@ const getFriendlyErrorMessage = (error: any, lang: 'en' | 'bn'): string => {
   if (msg.includes("invalid login credentials") || msg.includes("invalid email or password")) {
     return lang === 'bn' 
       ? "ইমেল বা পাসওয়ার্ড সঠিক নয়। যদি আপনার অ্যাকাউন্ট না থাকে, তবে অনুগ্রহ করে 'নিবন্ধন করুন'।"
-      : "Invalid email or password. If you don't have an account yet, please click 'Register Now'.";
+      : "Invalid email or password. If you don't have an account yet, please click 'Register'.";
   }
   
   if (msg.includes("user already registered") || msg.includes("already exists")) {
@@ -31,6 +32,12 @@ const getFriendlyErrorMessage = (error: any, lang: 'en' | 'bn'): string => {
       : "Please enter a valid email address.";
   }
   
+  if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("fetch")) {
+    return lang === 'bn'
+      ? "নেটওয়ার্ক সংযোগে সমস্যা বা সার্ভারে সংযোগ নেই। লোকাল মোডে পরিচালনা করা হচ্ছে।"
+      : "Server connection timeout or network issue. Proceeding with seamless offline mode.";
+  }
+
   if (msg.includes("password should be at least") || msg.includes("weak")) {
     return lang === 'bn'
       ? "পাসওয়ার্ডটি কমপক্ষে ৬ অক্ষরের হতে হবে।"
@@ -44,13 +51,27 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [photoURL, setPhotoURL] = useState('');
   const [loading, setLoading] = useState(false);
-  const [guestLoading, setGuestLoading] = useState(false);
   const [verificationSent, setVerificationSent] = useState(false);
   const [lastAuthError, setLastAuthError] = useState<string | null>(null);
+
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const compressed = await compressImage(file, 250, 250, 0.7);
+      setPhotoURL(compressed);
+      onNotify(
+        lang === 'bn' ? "গ্যালারি থেকে ছবি প্রসেস করা হয়েছে!" : "Photo selected from gallery!", 
+        "success"
+      );
+    } catch (err) {
+      console.warn("Error compressing selected image:", err);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,10 +94,6 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password || !displayName) return;
-    if (password !== confirmPassword) {
-      onNotify(lang === 'bn' ? "পাসওয়ার্ড মিলছে না!" : "Passwords do not match!", 'error');
-      return;
-    }
     setLoading(true);
     setLastAuthError(null);
     try {
@@ -101,23 +118,6 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
       onNotify(friendly, 'error');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGuestLogin = async () => {
-    setGuestLoading(true);
-    try {
-      await signInAsGuest(lang === 'bn' ? "ওমরাহ যাত্রী" : "Umrah Pilgrim");
-      onNotify(
-        lang === 'bn' 
-          ? "অতিথি মোডে সফলভাবে প্রবেশ করা হয়েছে!" 
-          : "Entered in Guest / Demo mode successfully!", 
-        'success'
-      );
-    } catch (err: any) {
-      onNotify(err.message || "Guest login failed", 'error');
-    } finally {
-      setGuestLoading(false);
     }
   };
 
@@ -302,19 +302,6 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
                   </span>
                 )}
               </button>
-
-              {/* Guest Login Option */}
-              <button
-                type="button"
-                onClick={handleGuestLogin}
-                disabled={guestLoading || loading}
-                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-emerald-400/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 hover:text-white text-xs font-medium transition-all"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                {guestLoading 
-                  ? (lang === 'bn' ? 'প্রবেশ হচ্ছে...' : 'Entering...') 
-                  : (lang === 'bn' ? 'গেস্ট / ডেমো মোডে প্রবেশ করুন' : 'Instant Guest / Demo Mode')}
-              </button>
             </div>
           </form>
         )}
@@ -322,6 +309,7 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
         {mode === 'register' && (
           <form className="space-y-3.5" onSubmit={handleRegister}>
             <div className="space-y-3">
+              {/* Full Name */}
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <User className="h-5 w-5 text-emerald-300" />
@@ -332,10 +320,11 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 border border-white/10 bg-white/5 placeholder-gray-400 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm"
-                  placeholder={lang === 'bn' ? "আপনার পূর্ণ নাম" : "Your Full Name"}
+                  placeholder={lang === 'bn' ? "আপনার নাম" : "Full Name"}
                 />
               </div>
 
+              {/* Email Address */}
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Mail className="h-5 w-5 text-emerald-300" />
@@ -350,19 +339,7 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
                 />
               </div>
 
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Image className="h-5 w-5 text-emerald-300" />
-                </div>
-                <input
-                  type="url"
-                  value={photoURL}
-                  onChange={(e) => setPhotoURL(e.target.value)}
-                  className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 border border-white/10 bg-white/5 placeholder-gray-400 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm"
-                  placeholder={lang === 'bn' ? "প্রোফাইল ছবি ইউআরএল (ঐচ্ছিক)" : "Profile Picture URL (Optional)"}
-                />
-              </div>
-
+              {/* Password (Single Input) */}
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Lock className="h-5 w-5 text-emerald-300" />
@@ -377,18 +354,48 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
                 />
               </div>
 
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-emerald-300" />
+              {/* Profile Picture Upload from Device Gallery / Camera or URL */}
+              <div className="p-3 bg-white/5 border border-white/10 rounded-xl space-y-2">
+                <label className="block text-xs font-medium text-emerald-200">
+                  {lang === 'bn' ? "প্রোফাইল ছবি (গ্যালারি থেকে সরাসরি আপলোড করুন)" : "Profile Picture (Upload from Gallery)"}
+                </label>
+                
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={photoURL || defaultAvatar}
+                      alt="Avatar Preview"
+                      className="w-12 h-12 rounded-full object-cover border-2 border-amber-400 shadow"
+                    />
+                  </div>
+
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="auth-gallery-input"
+                      className="hidden"
+                      onChange={handleImageFileUpload}
+                    />
+                    <label
+                      htmlFor="auth-gallery-input"
+                      className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow transition-colors"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      {lang === 'bn' ? "গ্যালারি থেকে নির্বাচন করুন" : "Choose from Gallery"}
+                    </label>
+
+                    <div className="relative">
+                      <input
+                        type="url"
+                        value={photoURL.startsWith("data:image") ? "" : photoURL}
+                        onChange={(e) => setPhotoURL(e.target.value)}
+                        className="appearance-none rounded-lg relative block w-full px-2.5 py-1.5 border border-white/10 bg-black/20 placeholder-gray-400 text-white focus:outline-none text-xs"
+                        placeholder={lang === 'bn' ? "বা ছবি ইউআরএল লিংক দিন" : "or paste Image URL link"}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <input
-                  type="password"
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 border border-white/10 bg-white/5 placeholder-gray-400 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-sm"
-                  placeholder={lang === 'bn' ? "পাসওয়ার্ড নিশ্চিত করুন" : "Confirm Password"}
-                />
               </div>
             </div>
 
@@ -401,7 +408,7 @@ export default function AuthView({ onNotify, lang }: AuthViewProps) {
                 {loading ? (lang === 'bn' ? 'অ্যাকাউন্ট তৈরি হচ্ছে...' : 'Creating Account...') : (
                   <span className="flex items-center gap-2">
                     <UserCheck className="w-4 h-4" />
-                    {lang === 'bn' ? "নিবন্ধন সম্পন্ন করুন" : "Complete Registration"}
+                    {lang === 'bn' ? "নিবন্ধন করুন" : "Register"}
                   </span>
                 )}
               </button>

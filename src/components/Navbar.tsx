@@ -27,6 +27,18 @@ export default function Navbar({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const t = translations[lang];
 
+  const userDisplayName = 
+    user?.displayName || 
+    user?.user_metadata?.displayName || 
+    user?.user_metadata?.display_name || 
+    (user?.email ? user.email.split('@')[0] : "User");
+
+  const userPhotoURL = 
+    user?.photoURL || 
+    user?.user_metadata?.photoURL || 
+    user?.user_metadata?.photo_url || 
+    defaultAvatar;
+
   const menuItems = [
     { id: "dashboard", label: t.dashboard, icon: LayoutDashboard },
     { id: "newEntry", label: t.newEntry, icon: PlusCircle },
@@ -101,13 +113,13 @@ export default function Navbar({
             {user && (
               <div className="flex items-center gap-2 border-l border-emerald-800 pl-4">
                 <img
-                  src={user.photoURL || defaultAvatar}
+                  src={userPhotoURL}
                   alt="Profile"
                   className="w-8 h-8 rounded-full border-2 border-amber-400 object-cover shadow-inner"
                 />
                 <div className="hidden md:block text-left">
                   <p className="text-xs font-semibold text-white max-w-[120px] truncate">
-                    {user.displayName || "User"}
+                    {userDisplayName}
                   </p>
                   <button
                     onClick={onLogout}
@@ -179,13 +191,13 @@ export default function Navbar({
               <div className="pt-4 pb-2 border-t border-emerald-900 mt-4 px-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <img
-                    src={user.photoURL || defaultAvatar}
+                    src={userPhotoURL}
                     alt="Profile"
                     className="w-10 h-10 rounded-full border-2 border-amber-400 object-cover"
                   />
                   <div>
                     <p className="text-sm font-bold text-white">
-                      {user.displayName || "User"}
+                      {userDisplayName}
                     </p>
                     <p className="text-xs text-emerald-300">
                       {user.email}

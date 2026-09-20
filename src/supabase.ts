@@ -2,6 +2,7 @@ import { createClient, SupabaseClient, User } from "@supabase/supabase-js";
 import { UserProfile, UserSettings, SavingsEntry } from "./types";
 import defaultAvatar from "./assets/images/user_profile_pic_1783927457570.jpg";
 import { defaultIslamicQuotes, IslamicQuote } from "./data/quotesData";
+import { safeSetItem, safeGetItem, safeRemoveItem, compressImage } from "./utils/storage";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://dnqeshylcqxpsetihsgg.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -32,59 +33,107 @@ export async function signUpUser(
   displayName: string,
   photoURL?: string
 ) {
-  if (!isSupabaseConfigured()) {
-    // Local fallback for quick preview if keys are not yet input in settings
+  // Ensure photo URL is compressed if it's a data URL
+  let finalPhoto = photoURL || defaultAvatar;
+  if (photoURL && photoURL.startsWith("data:image")) {
+    try {
+      finalPhoto = await compressImage(photoURL, 250, 250, 0.7);
+    } catch (e) {
+      console.warn("Image compression failed during signup:", e);
+    }
+  }
+
+  const createLocalFallbackUser = () => {
     const mockUser: User = {
       id: "local_user_" + Date.now(),
       app_metadata: {},
-      user_metadata: { displayName, photoURL: photoURL || defaultAvatar },
+      user_metadata: { displayName, display_name: displayName, photoURL: finalPhoto, photo_url: finalPhoto },
       aud: "authenticated",
       created_at: new Date().toISOString(),
       email: email,
     };
-    localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(mockUser));
+    safeSetItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(mockUser));
+    safeSetItem(
+      `${LOCAL_STORAGE_PROFILE_KEY}_${mockUser.id}`,
+      JSON.stringify({
+        uid: mockUser.id,
+        displayName,
+        photoURL: finalPhoto,
+        email: email,
+        createdAt: new Date().toISOString()
+      })
+    );
+    return mockUser;
+  };
+
+  if (!isSupabaseConfigured()) {
+    const mockUser = createLocalFallbackUser();
     return { data: { user: mockUser, session: null }, error: null };
   }
 
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        displayName: displayName,
-        photoURL: photoURL || defaultAvatar,
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          displayName: displayName,
+          display_name: displayName,
+          photoURL: finalPhoto,
+          photo_url: finalPhoto,
+        },
       },
-    },
-  });
+    });
 
-  if (error) throw error;
+    if (error) throw error;
 
-  // Insert initial profile and settings
-  if (data.user) {
-    try {
-      await supabase.from("profiles").upsert({
-        id: data.user.id,
-        email: data.user.email,
-        display_name: displayName,
-        photo_url: photoURL || defaultAvatar,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+    // Insert initial profile and settings
+    if (data.user) {
+      // Save to local storage cache immediately
+      safeSetItem(
+        `${LOCAL_STORAGE_PROFILE_KEY}_${data.user.id}`,
+        JSON.stringify({
+          uid: data.user.id,
+          displayName,
+          photoURL: finalPhoto,
+          email: data.user.email,
+          createdAt: new Date().toISOString()
+        })
+      );
 
-      await supabase.from("user_settings").upsert({
-        user_id: data.user.id,
-        goal_amount: 160000,
-        currency: "BDT",
-        theme: "light",
-        language: "en",
-        updated_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      console.warn("Could not insert initial profile row to Supabase table:", e);
+      try {
+        await supabase.from("profiles").upsert({
+          id: data.user.id,
+          email: data.user.email,
+          display_name: displayName,
+          photo_url: finalPhoto,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'id' });
+
+        await supabase.from("user_settings").upsert({
+          user_id: data.user.id,
+          goal_amount: 160000,
+          currency: "BDT",
+          theme: "light",
+          language: "en",
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+      } catch (e) {
+        console.warn("Could not insert initial profile row to Supabase table:", e);
+      }
     }
-  }
 
-  return { data, error: null };
+    return { data, error: null };
+  } catch (err: any) {
+    const msg = (err?.message || "").toLowerCase();
+    if (msg.includes("fetch") || msg.includes("network") || msg.includes("failed")) {
+      console.warn("Network fetch failed on signUp, using local session fallback:", err);
+      const mockUser = createLocalFallbackUser();
+      return { data: { user: mockUser, session: null }, error: null };
+    }
+    throw err;
+  }
 }
 
 export async function signInAsGuest(displayName: string = "Umrah Pilgrim") {
@@ -102,17 +151,16 @@ export async function signInAsGuest(displayName: string = "Umrah Pilgrim") {
 }
 
 export async function signInUser(email: string, password: string) {
-  if (!isSupabaseConfigured()) {
+  const getLocalUser = () => {
     const raw = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
     if (raw) {
-      const mockUser = JSON.parse(raw);
-      if (mockUser.email === email) {
-        return { data: { user: mockUser, session: null }, error: null };
-      }
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.email === email) return parsed;
+      } catch (e) {}
     }
-    // Create guest/demo session
     const mockUser: User = {
-      id: "local_user_1",
+      id: "local_user_" + Date.now(),
       app_metadata: {},
       user_metadata: { displayName: email.split("@")[0] || "Explorer", photoURL: defaultAvatar },
       aud: "authenticated",
@@ -120,18 +168,33 @@ export async function signInUser(email: string, password: string) {
       email: email,
     };
     localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(mockUser));
+    return mockUser;
+  };
+
+  if (!isSupabaseConfigured()) {
+    const mockUser = getLocalUser();
     return { data: { user: mockUser, session: null }, error: null };
   }
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
+    return { data, error: null };
+  } catch (err: any) {
+    const msg = (err?.message || "").toLowerCase();
+    if (msg.includes("fetch") || msg.includes("network")) {
+      console.warn("Network fetch failed on signIn, falling back to local session:", err);
+      const mockUser = getLocalUser();
+      return { data: { user: mockUser, session: null }, error: null };
+    }
+    throw err;
   }
-  return { data, error: null };
 }
 
 export async function signOutUser() {
@@ -152,12 +215,21 @@ export async function resetPasswordForUser(email: string) {
 }
 
 export async function updateUserProfile(displayName: string, photoURL?: string) {
+  let finalPhoto = photoURL || defaultAvatar;
+  if (photoURL && photoURL.startsWith("data:image")) {
+    try {
+      finalPhoto = await compressImage(photoURL, 250, 250, 0.7);
+    } catch (e) {
+      console.warn("Compression failed in updateUserProfile:", e);
+    }
+  }
+
   if (!isSupabaseConfigured()) {
-    const raw = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+    const raw = safeGetItem(LOCAL_STORAGE_USER_KEY);
     if (raw) {
       const u = JSON.parse(raw);
-      u.user_metadata = { ...u.user_metadata, displayName, photoURL: photoURL || defaultAvatar };
-      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(u));
+      u.user_metadata = { ...u.user_metadata, displayName, display_name: displayName, photoURL: finalPhoto, photo_url: finalPhoto };
+      safeSetItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(u));
     }
     return { data: {}, error: null };
   }
@@ -165,7 +237,9 @@ export async function updateUserProfile(displayName: string, photoURL?: string) 
   const { data, error } = await supabase.auth.updateUser({
     data: {
       displayName,
-      photoURL: photoURL || defaultAvatar,
+      display_name: displayName,
+      photoURL: finalPhoto,
+      photo_url: finalPhoto,
     },
   });
 
@@ -223,7 +297,7 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
 
 export async function saveUserSettings(userId: string, settings: UserSettings): Promise<void> {
   // Always update local cache
-  localStorage.setItem(`${LOCAL_STORAGE_SETTINGS_KEY}_${userId}`, JSON.stringify(settings));
+  safeSetItem(`${LOCAL_STORAGE_SETTINGS_KEY}_${userId}`, JSON.stringify(settings));
 
   if (!isSupabaseConfigured()) return;
 
@@ -235,32 +309,46 @@ export async function saveUserSettings(userId: string, settings: UserSettings): 
       theme: settings.theme,
       language: settings.language,
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'user_id' });
   } catch (err) {
     console.warn("Could not save settings to Supabase table:", err);
   }
 }
 
 // 2. User Profile
-export async function getUserProfile(userId: string, fallbackEmail: string = ""): Promise<UserProfile> {
-  const defaultProf: UserProfile = {
+export async function getUserProfile(
+  userId: string, 
+  fallbackEmail: string = "", 
+  userMetadata?: any
+): Promise<UserProfile> {
+  const metaName = userMetadata?.displayName || userMetadata?.display_name;
+  const metaPhoto = userMetadata?.photoURL || userMetadata?.photo_url;
+
+  // Retrieve cached local profile if present
+  let localProfileName = "";
+  let localProfilePhoto = "";
+  const saved = safeGetItem(`${LOCAL_STORAGE_PROFILE_KEY}_${userId}`);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.displayName) localProfileName = parsed.displayName;
+      if (parsed.photoURL) localProfilePhoto = parsed.photoURL;
+    } catch (e) {}
+  }
+
+  const initialName = localProfileName || metaName || "Explorer";
+  const initialPhoto = localProfilePhoto || metaPhoto || defaultAvatar;
+
+  const fallbackProf: UserProfile = {
     uid: userId,
     email: fallbackEmail,
-    displayName: "Explorer",
-    photoURL: defaultAvatar,
+    displayName: initialName,
+    photoURL: initialPhoto,
     createdAt: new Date().toISOString(),
   };
 
   if (!isSupabaseConfigured()) {
-    const saved = localStorage.getItem(`${LOCAL_STORAGE_PROFILE_KEY}_${userId}`);
-    if (saved) {
-      try {
-        return { ...defaultProf, ...JSON.parse(saved) };
-      } catch (e) {
-        return defaultProf;
-      }
-    }
-    return defaultProf;
+    return fallbackProf;
   }
 
   try {
@@ -271,38 +359,92 @@ export async function getUserProfile(userId: string, fallbackEmail: string = "")
       .maybeSingle();
 
     if (error || !data) {
-      return defaultProf;
+      return fallbackProf;
     }
+
+    const finalName = data.display_name && data.display_name !== "Explorer" ? data.display_name : initialName;
+    const finalPhoto = data.photo_url || initialPhoto;
 
     return {
       uid: data.id,
       email: data.email || fallbackEmail,
-      displayName: data.display_name || "Explorer",
-      photoURL: data.photo_url || defaultAvatar,
+      displayName: finalName,
+      photoURL: finalPhoto,
       createdAt: data.created_at || new Date().toISOString(),
     };
   } catch (err) {
     console.warn("Error getting user profile from Supabase:", err);
-    return defaultProf;
+    return fallbackProf;
   }
 }
 
-export async function saveUserProfile(userId: string, profile: { displayName: string; photoURL: string; email?: string }): Promise<void> {
-  localStorage.setItem(
+export async function saveUserProfile(
+  userId: string, 
+  profile: { displayName: string; photoURL: string; email?: string }
+): Promise<void> {
+  let compressedPhoto = profile.photoURL || defaultAvatar;
+  if (profile.photoURL && profile.photoURL.startsWith("data:image")) {
+    try {
+      compressedPhoto = await compressImage(profile.photoURL, 250, 250, 0.7);
+    } catch (e) {
+      console.warn("Failed compressing image in saveUserProfile:", e);
+    }
+  }
+
+  const finalProfile = {
+    ...profile,
+    photoURL: compressedPhoto,
+    uid: userId,
+    createdAt: new Date().toISOString()
+  };
+
+  // Always update local cache for smooth instant UI response
+  safeSetItem(
     `${LOCAL_STORAGE_PROFILE_KEY}_${userId}`,
-    JSON.stringify({ ...profile, uid: userId, createdAt: new Date().toISOString() })
+    JSON.stringify(finalProfile)
   );
+
+  // Update local mock user if applicable
+  const rawLocalUser = safeGetItem(LOCAL_STORAGE_USER_KEY);
+  if (rawLocalUser) {
+    try {
+      const u = JSON.parse(rawLocalUser);
+      u.user_metadata = { 
+        ...u.user_metadata, 
+        displayName: profile.displayName, 
+        display_name: profile.displayName, 
+        photoURL: compressedPhoto, 
+        photo_url: compressedPhoto 
+      };
+      safeSetItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(u));
+    } catch (e) {}
+  }
 
   if (!isSupabaseConfigured()) return;
 
   try {
-    await supabase.from("profiles").upsert({
+    // 1. Update Supabase Auth metadata
+    await supabase.auth.updateUser({
+      data: {
+        displayName: profile.displayName,
+        display_name: profile.displayName,
+        photoURL: compressedPhoto,
+        photo_url: compressedPhoto,
+      },
+    });
+
+    // 2. Upsert into database profiles table
+    const { error } = await supabase.from("profiles").upsert({
       id: userId,
       display_name: profile.displayName,
-      photo_url: profile.photoURL,
+      photo_url: compressedPhoto,
       email: profile.email,
       updated_at: new Date().toISOString(),
-    });
+    }, { onConflict: 'id' });
+
+    if (error) {
+      console.warn("Could not save profile to Supabase table:", error);
+    }
   } catch (err) {
     console.warn("Could not save profile to Supabase table:", err);
   }
@@ -311,7 +453,7 @@ export async function saveUserProfile(userId: string, profile: { displayName: st
 // 3. Savings Entries
 export async function getSavingsEntries(userId: string): Promise<SavingsEntry[]> {
   if (!isSupabaseConfigured()) {
-    const raw = localStorage.getItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`);
+    const raw = safeGetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`);
     if (raw) {
       try {
         const parsed: SavingsEntry[] = JSON.parse(raw);
@@ -333,7 +475,7 @@ export async function getSavingsEntries(userId: string): Promise<SavingsEntry[]>
     if (error) {
       console.warn("Supabase query error for savings_entries:", error);
       // Fallback to local cache if table is not yet created
-      const raw = localStorage.getItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`);
+      const raw = safeGetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`);
       return raw ? JSON.parse(raw) : [];
     }
 
@@ -352,11 +494,11 @@ export async function getSavingsEntries(userId: string): Promise<SavingsEntry[]>
     }));
 
     // Cache to local storage
-    localStorage.setItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(mapped));
+    safeSetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(mapped));
     return mapped;
   } catch (err) {
     console.warn("Failed to fetch savings entries from Supabase:", err);
-    const raw = localStorage.getItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`);
+    const raw = safeGetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`);
     return raw ? JSON.parse(raw) : [];
   }
 }
@@ -395,7 +537,7 @@ export async function addSavingsEntry(
   const updatedList = [newEntry, ...existing.filter((e) => e.id !== newId)].sort((a, b) =>
     b.date.localeCompare(a.date)
   );
-  localStorage.setItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(updatedList));
+  safeSetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(updatedList));
 
   if (isSupabaseConfigured()) {
     try {
@@ -454,7 +596,7 @@ export async function editSavingsEntry(
     }
     return e;
   }).sort((a, b) => b.date.localeCompare(a.date));
-  localStorage.setItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(updatedList));
+  safeSetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(updatedList));
 
   if (isSupabaseConfigured()) {
     try {
@@ -483,7 +625,7 @@ export async function removeSavingsEntry(userId: string, id: string): Promise<vo
   // Local storage removal
   const existing = await getSavingsEntries(userId);
   const filtered = existing.filter((e) => e.id !== id);
-  localStorage.setItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(filtered));
+  safeSetItem(`${LOCAL_STORAGE_ENTRIES_KEY}_${userId}`, JSON.stringify(filtered));
 
   if (isSupabaseConfigured()) {
     try {

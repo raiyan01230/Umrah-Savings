@@ -16,6 +16,7 @@ import {
 import { translations } from "./utils/translations";
 import defaultAvatar from "./assets/images/user_profile_pic_1783927457570.jpg";
 import { defaultIslamicQuotes, IslamicQuote } from "./data/quotesData";
+import { safeGetItem } from "./utils/storage";
 
 // Components
 import AuthView from "./components/AuthView";
@@ -109,7 +110,7 @@ export default function App() {
           });
         } else {
           // Check local fallback user if available
-          const raw = localStorage.getItem("umrah_savings_auth_user_v2");
+          const raw = safeGetItem("umrah_savings_auth_user_v2");
           if (raw) {
             try {
               const localUser = JSON.parse(raw);
@@ -186,7 +187,7 @@ export default function App() {
         setSettings(s);
 
         // Load Profile
-        const p = await getUserProfile(userId, user.email || "");
+        const p = await getUserProfile(userId, user.email || "", user.user_metadata);
         if (p) setProfile(p);
 
         // Load Entries
@@ -507,7 +508,7 @@ export default function App() {
         <Navbar
           currentTab={currentTab}
           setTab={setTab}
-          user={user}
+          user={profile ? { ...user, displayName: profile.displayName, photoURL: profile.photoURL } : user}
           onLogout={handleLogout}
           lang={settings.language}
           setLang={toggleLanguage}

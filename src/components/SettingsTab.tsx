@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { Settings, Target, Coins, ShieldCheck, Palette, Languages, Camera, User } from "lucide-react";
+import { Settings, Target, Coins, ShieldCheck, Palette, Languages, Camera, User, Upload } from "lucide-react";
 import { translations } from "../utils/translations";
 import { UserSettings } from "../types";
 import defaultAvatar from "../assets/images/user_profile_pic_1783927457570.jpg";
+import { compressImage } from "../utils/storage";
 
 interface SettingsTabProps {
   settings: UserSettings;
@@ -32,8 +33,33 @@ export default function SettingsTab({
   const [displayName, setDisplayName] = useState<string>(profile?.displayName || "");
   const [photoURL, setPhotoURL] = useState<string>(profile?.photoURL || "");
 
+  // Sync state when profile or settings props update from database
+  React.useEffect(() => {
+    if (profile?.displayName) setDisplayName(profile.displayName);
+    if (profile?.photoURL) setPhotoURL(profile.photoURL);
+  }, [profile?.displayName, profile?.photoURL]);
+
+  React.useEffect(() => {
+    if (settings.goalAmount) setGoalAmount(settings.goalAmount);
+    if (settings.currency) setCurrency(settings.currency);
+    if (settings.theme) setTheme(settings.theme);
+    if (settings.language) setCurrentLang(settings.language);
+  }, [settings.goalAmount, settings.currency, settings.theme, settings.language]);
+
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const compressed = await compressImage(file, 250, 250, 0.7);
+      setPhotoURL(compressed);
+    } catch (err) {
+      console.warn("Error compressing image in settings:", err);
+    }
+  };
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,18 +122,38 @@ export default function SettingsTab({
             </div>
           </div>
 
-          {/* Picture preview */}
+          {/* Picture preview & upload */}
           <div className="flex flex-col items-center gap-3 py-4">
-            <div className="relative">
+            <div className="relative group">
               <img
                 src={photoURL || defaultAvatar}
                 alt="Preview"
                 className="w-24 h-24 rounded-full object-cover border-4 border-emerald-500/20 shadow-md"
               />
-              <div className="absolute bottom-0 right-0 p-1.5 bg-emerald-600 rounded-full text-white shadow">
+              <input
+                type="file"
+                accept="image/*"
+                id="settings-avatar-file-input"
+                className="hidden"
+                onChange={handleImageFileUpload}
+              />
+              <label
+                htmlFor="settings-avatar-file-input"
+                className="absolute bottom-0 right-0 p-2 bg-emerald-600 hover:bg-emerald-500 rounded-full text-white shadow cursor-pointer transition-transform hover:scale-110"
+                title={lang === 'bn' ? "গ্যালারি থেকে ছবি আপলোড করুন" : "Upload photo from gallery"}
+              >
                 <Camera className="w-4 h-4" />
-              </div>
+              </label>
             </div>
+
+            <label
+              htmlFor="settings-avatar-file-input"
+              className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 rounded-xl text-xs font-semibold transition-colors border border-emerald-200 dark:border-emerald-800"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              {lang === 'bn' ? "গ্যালারি থেকে ছবি নির্বাচন করুন" : "Upload from Gallery"}
+            </label>
+
             <p className="text-xs text-gray-400 dark:text-gray-500">
               {profile?.email}
             </p>
